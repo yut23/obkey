@@ -3,6 +3,8 @@
 # Openbox Key Editor
 # Copyright (C) 2009 nsf <no.smile.face@gmail.com>
 # v1.1 - Code migrated from PyGTK to PyGObject github.com/stevenhoneyman/obkey
+# v1.2pre1 - solve a minor bug on copy-paste bug github.com/luffah/obkey
+# v1.2pre2 - structured presentation of actions... github.com/luffah/obkey
 # (v1.2 - aims to add drag and drop, classed actions, and alerting)  
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -74,6 +76,7 @@ replace_table_openbox2gtk = {
   "s" : "<Shift>",
   "hyper" : "<Hyper>",
   "h" : "<Hyper>"
+  
 }
 
 replace_table_gtk2openbox = {
@@ -83,6 +86,7 @@ replace_table_gtk2openbox = {
   "Mod4" : "Mod4",
   "Mod5" : "Mod5",
   "Control" : "C",
+  "Primary" : "C",
   "Alt" : "A",
   "Meta" : "M",
   "Super" : "W",
@@ -259,7 +263,8 @@ class KeyTable:
 					GObject.TYPE_STRING, # accel string (openbox)
 					GObject.TYPE_BOOLEAN, # chroot
 					GObject.TYPE_BOOLEAN, # show chroot
-					GObject.TYPE_PYOBJECT # OBKeyBind
+					GObject.TYPE_PYOBJECT, # OBKeyBind
+					GObject.TYPE_STRING    # keybind descriptor
 					)
 
 		cqk_model = Gtk.ListStore(GObject.TYPE_UINT, # accel key
@@ -275,7 +280,8 @@ class KeyTable:
 		return scroll
 
 	def create_views(self, model, cqk_model):
-		r0 = Gtk.CellRendererAccel()
+		# added accel_mode=1 (CELL_RENDERER_ACCEL_MODE_OTHER) for key "Tab"
+		r0 = Gtk.CellRendererAccel(accel_mode=1)
 		r0.props.editable = True
 		r0.connect('accel-edited', self.accel_edited)
 
@@ -283,16 +289,21 @@ class KeyTable:
 		r1.props.editable = True
 		r1.connect('edited', self.key_edited)
 
+		r3 = Gtk.CellRendererText()
+		r3.props.editable = False
+
 		r2 = Gtk.CellRendererToggle()
 		r2.connect('toggled', self.chroot_toggled)
 
 		c0 = Gtk.TreeViewColumn(_("Key"), r0, accel_key=0, accel_mods=1)
 		c1 = Gtk.TreeViewColumn(_("Key (text)"), r1, text=2)
 		c2 = Gtk.TreeViewColumn(_("Chroot"), r2, active=3, visible=4)
+		c3 = Gtk.TreeViewColumn(_("Action"), r3,  text=6)
 
 		c0.set_expand(True)
 
 		view = Gtk.TreeView(model)
+		view.append_column(c3)
 		view.append_column(c0)
 		view.append_column(c1)
 		view.append_column(c2)
@@ -336,19 +347,39 @@ class KeyTable:
 
 		toolbar.insert(Gtk.SeparatorToolItem(), -1)
 
+		but = Gtk.ToolButton(Gtk.STOCK_DND_MULTIPLE)
+		but.set_tooltip_text(_("Duplicate sibling keybind"))
+		but.connect('clicked', lambda but: self.duplicate_selected())
+		toolbar.insert(but, -1)
+		
+		but = Gtk.ToolButton(Gtk.STOCK_COPY)
+		but.set_tooltip_text(_("Copy"))
+		but.connect('clicked', lambda but: self.copy_selected())
+		toolbar.insert(but, -1)
+		
 		but = Gtk.ToolButton()
 		but.set_icon_widget(self.icons['add_sibling'])
 		but.set_tooltip_text(_("Insert sibling keybind"))
 		but.connect('clicked', lambda but: self.insert_sibling(OBKeyBind()))
 		toolbar.insert(but, -1)
 
+		but = Gtk.ToolButton(Gtk.STOCK_PASTE)
+		but.set_tooltip_text(_("Paste"))
+		but.connect('clicked', lambda but: self.insert_sibling(copy.deepcopy(self.copied)))
+		toolbar.insert(but, -1)
+		
+
 		but = Gtk.ToolButton()
 		but.set_icon_widget(self.icons['add_child'])
 		but.set_tooltip_text(_("Insert child keybind"))
 		but.connect('clicked', lambda but: self.insert_child(OBKeyBind()))
 		toolbar.insert(but, -1)
-		self.sw_insert_child.append(but)
 
+		but = Gtk.ToolButton(Gtk.STOCK_PASTE)
+		but.set_tooltip_text(_("Paste as child"))
+		but.connect('clicked', lambda but: self.insert_child(copy.deepcopy(self.copied)))
+		toolbar.insert(but, -1)
+		
 		but = Gtk.ToolButton(Gtk.STOCK_REMOVE)
 		but.set_tooltip_text(_("Remove keybind"))
 		but.connect('clicked', lambda but: self.del_selected())
@@ -374,13 +405,28 @@ class KeyTable:
 			self.ob.keyboard.chainQuitKey = ""
 		self.cqk_model.append((cqk_accel_key, cqk_accel_mods, self.ob.keyboard.chainQuitKey))
 
+	def get_action_desc(self,kb):
+		# frst_action added in Version 1.2 
+		if len(kb.actions) > 0: 
+			if kb.actions[0].name == "Execute":
+				frst_action = "[ " + kb.actions[0].options['command'] + " ]"
+			elif kb.actions[0].name == "SendToDesktop":
+				frst_action = _(kb.actions[0].name) + " " + str(kb.actions[0].options['desktop']) 
+			elif kb.actions[0].name == "Desktop":
+				frst_action = _(kb.actions[0].name) + " " + str(kb.actions[0].options['desktop'])
+			else :
+				frst_action =  _(kb.actions[0].name) 
+		else :
+			frst_action = "."
+		return frst_action
+
 	def apply_keybind(self, kb, parent=None):
 		accel_key, accel_mods = key_openbox2gtk(kb.key)
 		chroot = kb.chroot
 		show_chroot = len(kb.children) > 0 or not len(kb.actions)
-
+		
 		n = self.model.append(parent,
-				(accel_key, accel_mods, kb.key, chroot, show_chroot, kb))
+				(accel_key, accel_mods, kb.key, chroot, show_chroot, kb, self.get_action_desc(kb)))
 
 		for c in kb.children:
 			self.apply_keybind(c, n)
@@ -478,6 +524,10 @@ class KeyTable:
 		self.copy_selected()
 		self.del_selected()
 
+	def duplicate_selected(self):
+		self.copy_selected()
+		self.insert_sibling(copy.deepcopy(self.copied))
+
 	def copy_selected(self):
 		(model, it) = self.view.get_selection().get_selected()
 		if it:
@@ -502,7 +552,7 @@ class KeyTable:
 
 		accel_key, accel_mods = key_openbox2gtk(keybind.key)
 		show_chroot = len(keybind.children) > 0 or not len(keybind.actions)
-
+		
 		if it:
 			parent_it = model.iter_parent(it)
 			parent = None
@@ -512,11 +562,11 @@ class KeyTable:
 
 			self._insert_keybind(keybind, parent, after)
 			newit = self.model.insert_after(parent_it, it,
-					(accel_key, accel_mods, keybind.key, keybind.chroot, show_chroot, keybind))
+					(accel_key, accel_mods, keybind.key, keybind.chroot, show_chroot, keybind, self.get_action_desc(keybind)))
 		else:
 			self._insert_keybind(keybind)
 			newit = self.model.append(None,
-					(accel_key, accel_mods, keybind.key, keybind.chroot, show_chroot, keybind))
+					(accel_key, accel_mods, keybind.key, keybind.chroot, show_chroot, keybind, self.get_action_desc(keybind)))
 
 		if newit:
 			for c in keybind.children:
@@ -641,11 +691,42 @@ class ActionList:
 
 	def create_choices(self, ch):
 		choices = ch
-		action_list = {}
-		for a in actions:
-			action_list[_(a)] = a
-		for a in sorted(action_list.keys()):
-			choices.append((a,action_list[a]))
+		action_list1 = {}
+		
+		#~ Version 1.1 
+		#~ for a in actions:
+			#~ action_list[_(a)] = a
+		#~ for a in sorted(action_list.keys()):
+			#~ choices.append(None,[a,action_list[a]])
+		
+		# Version 1.2 
+		for a in actions_choices:
+			action_list1[_(a)] = a
+		for a in sorted(action_list1.keys()):
+			action_list2 = {}
+			content_a=actions_choices[action_list1[a]]
+			if ( type(content_a) is dict ):
+				iter0 = choices.append(None,[a,""])
+				
+				for b in content_a:
+					action_list2[_(b)] = b
+				
+				for b in sorted(action_list2.keys()):
+					action_list3 = {}
+					content_b=content_a[action_list2[b]]
+					if ( type(content_b) is dict ):
+						iter1 = choices.append(iter0,[b,""] )
+				
+						for c in content_b:
+							action_list3[_(c)] = c
+						for c in sorted(action_list3.keys()):
+							choices.append(iter1,[c,action_list3[c]])
+				
+					else:
+						choices.append(iter0,[b,action_list2[b]] )
+			else:
+				choices.append(None,[a,action_list1[a]] )
+		
 		return choices
 
 	def create_scroll(self, view):
@@ -658,9 +739,9 @@ class ActionList:
 	def create_view(self, model):
 		renderer = Gtk.CellRendererCombo()
 		def editingstarted(cell, widget, path):
-			widget.set_wrap_width(4)
+			widget.set_wrap_width(1)
 
-		chs = Gtk.ListStore(GObject.TYPE_STRING,GObject.TYPE_STRING)
+		chs = Gtk.TreeStore(GObject.TYPE_STRING,GObject.TYPE_STRING)
 		renderer.props.model = self.create_choices(chs)
 		renderer.props.text_column = 0
 		renderer.props.editable = True
@@ -798,6 +879,10 @@ class ActionList:
 		self.copy_selected()
 		self.del_selected()
 
+	def duplicate_selected(self):
+		self.copy_selected()
+		self.insert_action(self.copied)
+
 	def copy_selected(self):
 		if self.actions is None:
 			return
@@ -911,6 +996,7 @@ class ActionList:
 			return
 		for a in self.actions:
 			self.model.append((_(a.name), a))
+		
 		if len(self.model):
 			self.view.get_selection().select_iter(self.model.get_iter_first())
 		self.cond_action_list_nonempty.set_state(len(self.model))
@@ -1438,35 +1524,150 @@ class OCFinalActions(object):
 
 #-------------------------------------------------------------------------------------
 
-actions = {
-	"Execute": [
-		OCString("command", "", ['execute']),
-		OCString("prompt", ""),
-		OCStartupNotify()
-	],
-	"ShowMenu": [
-		OCString("menu", "")
-	],
-	"NextWindow": [
-		OCCombo('dialog', 'list', ['list', 'icons', 'none']),
-		OCBoolean("bar", True),
-		OCBoolean("raise", False),
-		OCBoolean("allDesktops", False),
-		OCBoolean("panels", False),
-		OCBoolean("desktop", False),
-		OCBoolean("linear", False),
-		OCFinalActions()
-	],
-	"PreviousWindow": [
-		OCBoolean("dialog", True),
-		OCBoolean("bar", True),
-		OCBoolean("raise", False),
-		OCBoolean("allDesktops", False),
-		OCBoolean("panels", False),
-		OCBoolean("desktop", False),
-		OCBoolean("linear", False),
-		OCFinalActions()
-	],
+#~ actions = {
+	#~ "Execute": [
+		#~ OCString("command", "", ['execute']),
+		#~ OCString("prompt", ""),
+		#~ OCStartupNotify()
+	#~ ],
+	#~ "ShowMenu": [
+		#~ OCString("menu", "")
+	#~ ],
+	#~ "NextWindow": [
+		#~ OCCombo('dialog', 'list', ['list', 'icons', 'none']),
+		#~ OCBoolean("bar", True),
+		#~ OCBoolean("raise", False),
+		#~ OCBoolean("allDesktops", False),
+		#~ OCBoolean("panels", False),
+		#~ OCBoolean("desktop", False),
+		#~ OCBoolean("linear", False),
+		#~ OCFinalActions()
+	#~ ],
+	#~ "PreviousWindow": [
+		#~ OCBoolean("dialog", True),
+		#~ OCBoolean("bar", True),
+		#~ OCBoolean("raise", False),
+		#~ OCBoolean("allDesktops", False),
+		#~ OCBoolean("panels", False),
+		#~ OCBoolean("desktop", False),
+		#~ OCBoolean("linear", False),
+		#~ OCFinalActions()
+	#~ ],
+	#~ "DirectionalFocusNorth": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
+	#~ "DirectionalFocusSouth": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
+	#~ "DirectionalFocusEast": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
+	#~ "DirectionalFocusWest": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
+	#~ "DirectionalFocusNorthEast": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
+	#~ "DirectionalFocusNorthWest": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
+	#~ "DirectionalFocusSouthEast": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
+	#~ "DirectionalFocusSouthWest": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
+	#~ "DirectionalTargetNorth": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
+	#~ "DirectionalTargetSouth": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
+	#~ "DirectionalTargetEast": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
+	#~ "DirectionalTargetWest": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
+	#~ "DirectionalTargetNorthEast": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
+	#~ "DirectionalTargetNorthWest": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
+	#~ "DirectionalTargetSouthEast": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
+	#~ "DirectionalTargetSouthWest": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
+	#~ "Desktop": [ OCNumber("desktop", 1, 1, 9999, True) ],
+	#~ "DesktopNext": [ OCBoolean("wrap", True) ],
+	#~ "DesktopPrevious": [ OCBoolean("wrap", True) ],
+	#~ "DesktopLeft": [ OCBoolean("wrap", True) ],
+	#~ "DesktopRight": [ OCBoolean("wrap", True) ],
+	#~ "DesktopUp": [ OCBoolean("wrap", True) ],
+	#~ "DesktopDown": [ OCBoolean("wrap", True) ],
+	#~ "GoToDesktop": [ OCString("to", ""), OCString("wrap", "") ],
+	#~ "DesktopLast": [],
+	#~ "AddDesktopLast": [],
+	#~ "RemoveDesktopLast": [],
+	#~ "AddDesktopCurrent": [],
+	#~ "RemoveDesktopCurrent": [],
+	#~ "ToggleShowDesktop": [],
+	#~ "ToggleDockAutohide": [],
+	#~ "Reconfigure": [],
+	#~ "Restart": [ OCString("command", "", ["execute"]) ],
+	#~ "Exit": [ OCBoolean("prompt", True) ],
+	#~ "SessionLogout": [ OCBoolean("prompt", True) ],
+	#~ "Debug": [ OCString("string", "") ],
+	#~ "If": [ OCIf("", "") ],
+#~ 
+	#~ "Focus": [],
+	#~ "Raise": [],
+	#~ "Lower": [],
+	#~ "RaiseLower": [],
+	#~ "Unfocus": [],
+	#~ "FocusToBottom": [],
+	#~ "Iconify": [],
+	#~ "Close": [],
+	#~ "ToggleShade": [],
+	#~ "Shade": [],
+	#~ "Unshade": [],
+	#~ "ToggleOmnipresent": [],
+	#~ "ToggleMaximizeFull": [],
+	#~ "MaximizeFull": [],
+	#~ "UnmaximizeFull": [],
+	#~ "ToggleMaximizeVert": [],
+	#~ "MaximizeVert": [],
+	#~ "UnmaximizeVert": [],
+	#~ "ToggleMaximizeHorz": [],
+	#~ "MaximizeHorz": [],
+	#~ "UnmaximizeHorz": [],
+	#~ "ToggleFullscreen": [],
+	#~ "ToggleDecorations": [],
+	#~ "Decorate": [],
+	#~ "Undecorate": [],
+	#~ "SendToDesktop": [ OCNumber("desktop", 1, 1, 9999, True), OCBoolean("follow", True) ],
+	#~ "SendToDesktopNext": [ OCBoolean("wrap", True), OCBoolean("follow", True) ],
+	#~ "SendToDesktopPrevious": [ OCBoolean("wrap", True), OCBoolean("follow", True) ],
+	#~ "SendToDesktopLeft": [ OCBoolean("wrap", True), OCBoolean("follow", True) ],
+	#~ "SendToDesktopRight": [ OCBoolean("wrap", True), OCBoolean("follow", True) ],
+	#~ "SendToDesktopUp": [ OCBoolean("wrap", True), OCBoolean("follow", True) ],
+	#~ "SendToDesktopDown": [ OCBoolean("wrap", True), OCBoolean("follow", True) ],
+	#~ "Move": [],
+	#~ "Resize": [
+		#~ OCCombo("edge", "none", ['none', "top", "left", "right", "bottom", "topleft", "topright", "bottomleft", "bottomright"])
+	#~ ],
+	#~ "MoveToCenter": [],
+	#~ "MoveResizeTo": [
+		#~ OCString("x", "current"),
+		#~ OCString("y", "current"),
+		#~ OCString("width", "current"),
+		#~ OCString("height", "current"),
+		#~ OCString("monitor", "current")
+	#~ ],
+	#~ "MoveRelative": [
+		#~ OCNumber("x", 0, -9999, 9999),
+		#~ OCNumber("y", 0, -9999, 9999)
+	#~ ],
+	#~ "ResizeRelative": [
+		#~ OCNumber("left", 0, -9999, 9999),
+		#~ OCNumber("right", 0, -9999, 9999),
+		#~ OCNumber("top", 0, -9999, 9999),
+		#~ OCNumber("bottom", 0, -9999, 9999)
+	#~ ],
+	#~ "MoveToEdgeNorth": [],
+	#~ "MoveToEdgeSouth": [],
+	#~ "MoveToEdgeWest": [],
+	#~ "MoveToEdgeEast": [],
+	#~ "GrowToEdgeNorth": [],
+	#~ "GrowToEdgeSouth": [],
+	#~ "GrowToEdgeWest": [],
+	#~ "GrowToEdgeEast": [],
+	#~ "ShadeLower": [],
+	#~ "UnshadeRaise": [],
+	#~ "ToggleAlwaysOnTop": [],
+	#~ "ToggleAlwaysOnBottom": [],
+	#~ "SendToTopLayer": [],
+	#~ "SendToBottomLayer": [],
+	#~ "SendToNormalLayer": [],
+#~ 
+	#~ "BreakChroot": []
+#~ }
+
+
+actions_window_nav = {
+	"NextWindow": [OCCombo('dialog', 'list', ['list', 'icons', 'none']),OCBoolean("bar", True),OCBoolean("raise", False),OCBoolean("allDesktops", False),OCBoolean("panels", False),OCBoolean("desktop", False),OCBoolean("linear", False),OCFinalActions()],
+	"PreviousWindow": [OCBoolean("dialog", True),OCBoolean("bar", True),OCBoolean("raise", False),OCBoolean("allDesktops", False),OCBoolean("panels", False),OCBoolean("desktop", False),OCBoolean("linear", False),OCFinalActions()],
 	"DirectionalFocusNorth": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
 	"DirectionalFocusSouth": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
 	"DirectionalFocusEast": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
@@ -1482,7 +1683,9 @@ actions = {
 	"DirectionalTargetNorthEast": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
 	"DirectionalTargetNorthWest": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
 	"DirectionalTargetSouthEast": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
-	"DirectionalTargetSouthWest": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ],
+	"DirectionalTargetSouthWest": [ OCBoolean("dialog", True), OCBoolean("bar", True), OCBoolean("raise", False), OCFinalActions() ]
+}
+actions_desktop_nav_mov = {
 	"Desktop": [ OCNumber("desktop", 1, 1, 9999, True) ],
 	"DesktopNext": [ OCBoolean("wrap", True) ],
 	"DesktopPrevious": [ OCBoolean("wrap", True) ],
@@ -1491,26 +1694,42 @@ actions = {
 	"DesktopUp": [ OCBoolean("wrap", True) ],
 	"DesktopDown": [ OCBoolean("wrap", True) ],
 	"GoToDesktop": [ OCString("to", ""), OCString("wrap", "") ],
-	"DesktopLast": [],
-	"AddDesktopLast": [],
+	"DesktopLast": []
+}
+actions_desktop_nav_del = {
 	"RemoveDesktopLast": [],
-	"AddDesktopCurrent": [],
-	"RemoveDesktopCurrent": [],
-	"ToggleShowDesktop": [],
+	"RemoveDesktopCurrent": []
+}
+actions_desktop_nav_add = {
+	"AddDesktopLast": [],
+	"AddDesktopCurrent": []
+}
+actions_wm = {
+	"ShowMenu": [OCString("menu", "")],
 	"ToggleDockAutohide": [],
 	"Reconfigure": [],
 	"Restart": [ OCString("command", "", ["execute"]) ],
 	"Exit": [ OCBoolean("prompt", True) ],
 	"SessionLogout": [ OCBoolean("prompt", True) ],
 	"Debug": [ OCString("string", "") ],
-	"If": [ OCIf("", "") ],
-
+	"ToggleShowDesktop": []
+}
+actions_window_focus = {
 	"Focus": [],
-	"Raise": [],
-	"Lower": [],
-	"RaiseLower": [],
 	"Unfocus": [],
 	"FocusToBottom": [],
+	"RaiseLower": [],
+	"Raise": [],
+	"Lower": [],
+	"ShadeLower": [],
+	"UnshadeRaise": [],
+	"ToggleAlwaysOnTop": [],
+	"ToggleAlwaysOnBottom": [],
+	"SendToTopLayer": [],
+	"SendToBottomLayer": [],
+	"SendToNormalLayer": []
+}
+actions_window_set = {
 	"Iconify": [],
 	"Close": [],
 	"ToggleShade": [],
@@ -1529,18 +1748,20 @@ actions = {
 	"ToggleFullscreen": [],
 	"ToggleDecorations": [],
 	"Decorate": [],
-	"Undecorate": [],
+	"Undecorate": []
+}
+
+actions_window_send = {
 	"SendToDesktop": [ OCNumber("desktop", 1, 1, 9999, True), OCBoolean("follow", True) ],
 	"SendToDesktopNext": [ OCBoolean("wrap", True), OCBoolean("follow", True) ],
 	"SendToDesktopPrevious": [ OCBoolean("wrap", True), OCBoolean("follow", True) ],
 	"SendToDesktopLeft": [ OCBoolean("wrap", True), OCBoolean("follow", True) ],
 	"SendToDesktopRight": [ OCBoolean("wrap", True), OCBoolean("follow", True) ],
 	"SendToDesktopUp": [ OCBoolean("wrap", True), OCBoolean("follow", True) ],
-	"SendToDesktopDown": [ OCBoolean("wrap", True), OCBoolean("follow", True) ],
+	"SendToDesktopDown": [ OCBoolean("wrap", True), OCBoolean("follow", True) ]
+}
+actions_window_move = {
 	"Move": [],
-	"Resize": [
-		OCCombo("edge", "none", ['none', "top", "left", "right", "bottom", "topleft", "topright", "bottomleft", "bottomright"])
-	],
 	"MoveToCenter": [],
 	"MoveResizeTo": [
 		OCString("x", "current"),
@@ -1553,30 +1774,75 @@ actions = {
 		OCNumber("x", 0, -9999, 9999),
 		OCNumber("y", 0, -9999, 9999)
 	],
+	"MoveToEdgeNorth": [],
+	"MoveToEdgeSouth": [],
+	"MoveToEdgeWest": [],
+	"MoveToEdgeEast": []
+}
+actions_window_resize = {
+	"Resize": [
+		OCCombo("edge", "none", ['none', "top", "left", "right", "bottom", "topleft", "topright", "bottomleft", "bottomright"])
+	],
 	"ResizeRelative": [
 		OCNumber("left", 0, -9999, 9999),
 		OCNumber("right", 0, -9999, 9999),
 		OCNumber("top", 0, -9999, 9999),
 		OCNumber("bottom", 0, -9999, 9999)
 	],
-	"MoveToEdgeNorth": [],
-	"MoveToEdgeSouth": [],
-	"MoveToEdgeWest": [],
-	"MoveToEdgeEast": [],
 	"GrowToEdgeNorth": [],
 	"GrowToEdgeSouth": [],
 	"GrowToEdgeWest": [],
-	"GrowToEdgeEast": [],
-	"ShadeLower": [],
-	"UnshadeRaise": [],
-	"ToggleAlwaysOnTop": [],
-	"ToggleAlwaysOnBottom": [],
-	"SendToTopLayer": [],
-	"SendToBottomLayer": [],
-	"SendToNormalLayer": [],
+	"GrowToEdgeEast": []
+}
 
+actions_choices = {
+	"Execute": [
+		OCString("command", "", ['execute']),
+		OCString("prompt", ""),
+		OCStartupNotify()
+	],
+# IF Not fully supported yet
+#	"If": [ OCIf("", "") ],
 	"BreakChroot": []
 }
+
+actions={}
+for k in actions_choices:
+	actions[k]=actions_choices[k]
+for k in actions_window_nav:
+	actions[k]=actions_window_nav[k]
+for k in actions_window_focus:
+	actions[k]=actions_window_focus[k]
+for k in actions_window_move:
+	actions[k]=actions_window_move[k]
+for k in actions_window_resize:
+	actions[k]=actions_window_resize[k]
+for k in actions_window_send:
+	actions[k]=actions_window_send[k]
+for k in actions_desktop_nav_add:
+	actions[k]=actions_desktop_nav_add[k]
+for k in actions_desktop_nav_del:
+	actions[k]=actions_desktop_nav_del[k]
+for k in actions_desktop_nav_mov:
+	actions[k]=actions_desktop_nav_mov[k]
+for k in actions_window_set:
+	actions[k]=actions_window_set[k]
+for k in actions_wm:
+	actions[k]=actions_wm[k]
+
+actions_choices["Window Navigation"]=actions_window_nav;
+actions_choices["Window Focus"]=actions_window_focus;
+actions_choices["Window Move"]=actions_window_move;
+actions_choices["Window Resize"]=actions_window_resize;
+actions_choices["Window Desktop Change"]=actions_window_send;
+actions_choices["Desktop Navigation"]={
+ "Add desktop" : actions_desktop_nav_add,
+ "Remove desktop" : actions_desktop_nav_del,
+ "Move to desktop" :actions_desktop_nav_mov
+ };
+actions_choices["Window Properties"]=actions_window_set;
+actions_choices["Window/Session Management"]=actions_wm;
+	
 
 #=====================================================================================
 # Config parsing and interaction

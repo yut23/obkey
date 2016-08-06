@@ -4,6 +4,7 @@
 # Copyright (C) 2009 nsf <no.smile.face@gmail.com>
 # v1.1 - Code migrated from PyGTK to PyGObject github.com/stevenhoneyman/obkey
 # v1.2pre1 - solve a minor bug on copy-paste bug github.com/luffah/obkey
+# v1.2pre2 - 19.06.2016 - structured presentation of actions... github.com/luffah/obkey
 #
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -44,7 +45,7 @@ ob = obkey_classes.OpenboxConfig()
 ob.load(path)
 
 win = Gtk.Window(Gtk.WindowType.TOPLEVEL)
-win.set_default_size(640,480)
+win.set_default_size(800,480)
 win.set_title(obkey_classes.config_title)
 win.connect("destroy", die)
 
