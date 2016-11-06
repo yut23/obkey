@@ -46,8 +46,8 @@ from xml.sax.saxutils import escape
 
 config_prefix = '/usr'
 config_icons = os.path.join(config_prefix, 'share/obkey/icons')
-#~ config_locale_dir = os.path.join(config_prefix, 'share/locale')
-config_locale_dir = os.path.join('./locale')
+config_locale_dir = os.path.join(config_prefix, 'share/locale')
+#config_locale_dir = os.path.join('./locale')
 
 gettext.install('obkey', config_locale_dir) # init gettext
 
