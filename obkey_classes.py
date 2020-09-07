@@ -626,8 +626,8 @@ class PropertyTable:
 		label = Gtk.Label(label=_(label_text))
 		label.set_alignment(0, 0)
 		row = self.table.props.n_rows
-		self.table.attach(label, 0, 1, row, row+1, Gtk.AttachOptions.EXPAND | Gtk.AttachOptions.FILL, 0, 5, 0)
-		self.table.attach(table, 1, 2, row, row+1, Gtk.AttachOptions.FILL, 0, 5, 0)
+		self.table.attach(label, 0, 1, row, row+1, Gtk.AttachOptions.FILL, 0, 5, 0)
+		self.table.attach(table, 1, 2, row, row+1, Gtk.AttachOptions.EXPAND | Gtk.AttachOptions.FILL, 0, 5, 0)
 
 	def clear(self):
 		cs = self.table.get_children()
@@ -1463,8 +1463,8 @@ class OCStartupNotify(object):
 			label.set_alignment(0,0)
 			if addtosens:
 				sens_list.append(label)
-			table.attach(label, 0, 1, row, row+1, Gtk.AttachOptions.EXPAND | Gtk.AttachOptions.FILL, 0, 0, 0)
-			table.attach(widget, 1, 2, row, row+1, Gtk.AttachOptions.FILL, 0, 0, 0)
+			table.attach(label, 0, 1, row, row+1, Gtk.AttachOptions.FILL, 0, 0, 0)
+			table.attach(widget, 1, 2, row, row+1, Gtk.AttachOptions.EXPAND | Gtk.AttachOptions.FILL, 0, 0, 0)
 
 		table = Gtk.Table(1, 2)
 		put_table(table, "enabled:", enabled, 0, False)
